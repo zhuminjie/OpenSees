@@ -14,7 +14,6 @@
 ** Developed by:                                                      **
 **   Frank McKenna (fmckenna@ce.berkeley.edu)                         **
 **   Gregory L. Fenves (fenves@ce.berkeley.edu)                       **
-**   Filip C. Filippou (filippou@ce.berkeley.edu)                     **
 **                                                                    **
 ** ****************************************************************** */
 
@@ -33,6 +32,63 @@
 // force and deformation, damage due to deformation and energy, and
 // degraded unloading stiffness based on maximum ductility.  This
 // is a modified implementation of Hyster2.f90 by Filippou.
+// 
+// February 2026, significant REWRITE OF envelope behavior by Silvia Mazzoni
+/* *****************************************************************************
+ *  HystereticSMMaterial (HystereticSM / HystereticSM Material)
+ *
+ *  Purpose
+ *  -------
+ *  Uniaxial multilinear hysteretic material with:
+ *    - independent positive/negative backbones (2–7 points per side),
+ *    - pinching (pinchX, pinchY),
+ *    - stiffness degradation on unloading/reloading (beta-based),
+ *    - optional envelope degradation driven by ductility and/or energy damage.
+ *
+ *  Key Implementation Notes
+ *  ------------------------
+ *  1) Unloading stiffness modifiers (kn, kp)
+ *     kn and kp are computed from normalized ductility measures and constrained to >= 1
+ *     (implemented via: k = (k < 1) ? 1 : 1/k).
+ *
+ *  2) Damage factor damfc and monotonic peak tracking
+ *     A scalar damage factor damfc is computed at load reversals as:
+ *
+ *         damfc = damEnergy + damDuct
+ *
+ *     where:
+ *       damEnergy = damfc2 * (energy / energyA)   (energy accumulated over history)
+ *       damDuct   = damfc1Mag * (normalized ductility excursion beyond yield)
+ *
+ *     To prevent non-physical “damage recovery” (and to avoid reloading-line artifacts),
+ *     damfc is enforced to be monotonic:
+ *
+ *         damfc = max(damfc, CdamfcPeak)
+ *
+ *     and then committed as:
+ *
+ *         TdamfcPeak = damfc
+ *
+ *  3) User-controlled ductility coupling via sign of damfc1
+ *     - damfc1 > 0: “same-direction” ductility damage (only the active-side excursion contributes)
+ *     - damfc1 < 0: “two-sided” ductility damage (both positive and negative excursions contribute)
+ *
+ *     The magnitude is always |damfc1| (stored as damfc1Mag).
+ *
+ *  4) Envelope degradation (degEnvp/degEnvn)
+ *     Envelope strengths (mom2..mom7) and optionally deformation points (rot2..rot7)
+ *     are scaled by:
+ *
+ *         damAdj = 1 - |degEnv| * damfc
+ *
+ *     with bounds enforced to keep the envelope well-defined.
+ *
+ *  Author
+ *  ------
+ *  Silvia Mazzoni (silviamazzoni@yahoo.com)
+ *
+ *  **************************************************************************** */
+
 
 #ifndef HystereticSMMaterial_h
 #define HystereticSMMaterial_h
@@ -214,9 +270,11 @@ private:
 	// Reference (undegraded) envelope points (do NOT modify after ctor / param updates)
 	double mom2p_ref, mom3p_ref, mom4p_ref, mom5p_ref, mom6p_ref, mom7p_ref;
 	double rot2p_ref, rot3p_ref, rot4p_ref, rot5p_ref, rot6p_ref, rot7p_ref;
+	double rot1p_ref;
 
 	double mom2n_ref, mom3n_ref, mom4n_ref, mom5n_ref, mom6n_ref, mom7n_ref;
 	double rot2n_ref, rot3n_ref, rot4n_ref, rot5n_ref, rot6n_ref, rot7n_ref;
+	double rot1n_ref;
 
 
 	double CrotMaxDuctUsed, CrotMinDuctUsed;
@@ -242,8 +300,11 @@ private:
 	double KeP;
 	double KeN;
 
+	double damfc1Mag;
+	bool ductBothSides;
 
-
+	double damDuctPos(double tiny);
+	double damDuctNeg(double tiny);
 
 };
 
